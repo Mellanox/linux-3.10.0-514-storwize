@@ -1064,6 +1064,12 @@ struct mlx5_query_eq_mbox_out {
 	struct mlx5_eq_context	ctx;
 };
 
+#define MLX5_CAP_PCAM_FEATURE(mdev, fld) \
+	MLX5_GET(pcam_reg, (mdev)->caps.pcam, feature_cap_mask.enhanced_features.fld)
+
+#define MLX5_CAP_MCAM_FEATURE(mdev, fld) \
+	MLX5_GET(mcam_reg, (mdev)->caps.mcam, mng_feature_cap_mask.enhanced_features.fld)
+
 enum {
 	MLX5_MKEY_STATUS_FREE = 1 << 6,
 };
