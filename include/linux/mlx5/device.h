@@ -1398,6 +1398,10 @@ enum mlx5_mcam_feature_groups {
 	MLX5_GET(vector_calc_cap, \
 		 mdev->hca_caps_cur[MLX5_CAP_VECTOR_CALC], cap)
 
+#define MLX5_CAP_MCAM_REG(mdev, reg) \
+	MLX5_GET(mcam_reg, (mdev)->caps.mcam, mng_access_reg_cap_mask.access_regs.reg)
+
+
 enum {
 	MLX5_CMD_STAT_OK			= 0x0,
 	MLX5_CMD_STAT_INT_ERR			= 0x1,
