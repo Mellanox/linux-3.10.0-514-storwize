@@ -416,6 +416,8 @@ struct mlx5_uar {
 };
 
 
+struct mlx5_fw_crdump;
+
 struct mlx5_core_health {
 	struct health_buffer __iomem   *health;
 	__be32 __iomem		       *health_counter;
@@ -430,6 +432,7 @@ struct mlx5_core_health {
 	struct work_struct		work;
 	struct delayed_work		recover_work;
 	struct work_struct		time_sync;
+	struct mlx5_fw_crdump		*crdump;
 };
 
 struct mlx5_cq_table {

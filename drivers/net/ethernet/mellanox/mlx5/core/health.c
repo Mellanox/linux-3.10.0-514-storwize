@@ -178,14 +178,25 @@ static u32 check_fatal_sensors(struct mlx5_core_dev *dev)
 
 void mlx5_enter_error_state(struct mlx5_core_dev *dev)
 {
+	enum mlx5_health_err fatal_error;
+
 	mutex_lock(&dev->intf_state_mutex);
 	if (dev->state == MLX5_DEVICE_STATE_INTERNAL_ERROR)
 		goto unlock;
 
 	mlx5_core_err(dev, "start\n");
-	if (check_fatal_sensors(dev)) {
+	fatal_error = check_fatal_sensors(dev);
+	if (fatal_error) {
 		dev->state = MLX5_DEVICE_STATE_INTERNAL_ERROR;
 		trigger_cmd_completions(dev);
+	}
+
+	if (fatal_error != MLX5_SENSOR_PCI_ERR &&
+	    fatal_error != MLX5_SENSOR_PCI_COMM_ERR) {
+		if(mlx5_fill_cr_dump(dev))
+			mlx5_core_err(dev, "Failed to collect crdump area.\n");
+	} else {
+		mlx5_core_err(dev, "pci in bad state, crdump will not be collected\n");
 	}
 
 	mlx5_core_event(dev, MLX5_DEV_EVENT_SYS_ERROR, 1);

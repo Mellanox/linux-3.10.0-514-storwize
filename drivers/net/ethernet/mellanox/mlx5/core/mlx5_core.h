@@ -42,7 +42,8 @@
 #define DRIVER_VERSION "3.0-1"
 #define DRIVER_RELDATE  "January 2015"
 
-extern int mlx5_core_debug_mask;
+#define MLX5_CORE_PROC "driver/mlx5_core"
+#define MLX5_CORE_PROC_CRDUMP "crdump"
 
 #define mlx5_core_dbg(__dev, format, ...)				\
 	dev_dbg(&(__dev)->pdev->dev, "%s:%s:%d:(pid %d): " format,	\
@@ -68,9 +69,21 @@ do {									\
 #define mlx5_core_info(__dev, format, ...)				\
 	dev_info(&(__dev)->pdev->dev, format, ##__VA_ARGS__)
 
+
+extern struct proc_dir_entry *mlx5_crdump_dir;
+extern int mlx5_core_debug_mask;
+
 enum {
 	MLX5_CMD_DATA, /* print command payload only */
 	MLX5_CMD_TIME, /* print command execution time */
+};
+
+struct mlx5_fw_crdump {
+	u32	crspace_size;
+	/* sync reading/freeing the data */
+	struct mutex crspace_mutex;
+	u32	vsec_addr;
+	u8	*crspace;
 };
 
 static inline int mlx5_cmd_exec_check_status(struct mlx5_core_dev *dev, u32 *in,
@@ -111,5 +124,10 @@ int mlx5_query_mcam_reg(struct mlx5_core_dev *dev, u32 *mcap, u8 feature_group,
 
 void mlx5e_init(void);
 void mlx5e_cleanup(void);
+
+int mlx5_cr_protected_capture(struct mlx5_core_dev *dev);
+int mlx5_crdump_init(struct mlx5_core_dev *dev);
+void mlx5_crdump_cleanup(struct mlx5_core_dev *dev);
+int mlx5_fill_cr_dump(struct mlx5_core_dev *dev);
 
 #endif /* __MLX5_CORE_H__ */
