@@ -124,6 +124,7 @@ enum {
 	MLX5_REG_HOST_ENDIANNESS = 0x7004,
 	MLX5_REG_MCIA		 = 0x9014,
 	MLX5_REG_MLCR		 = 0x902b,
+	MLX5_REG_MRTC		 = 0x902d,
 	MLX5_REG_MCAM		 = 0x907f,
 };
 
@@ -428,6 +429,7 @@ struct mlx5_core_health {
 	unsigned long			flags;
 	struct work_struct		work;
 	struct delayed_work		recover_work;
+	struct work_struct		time_sync;
 };
 
 struct mlx5_cq_table {

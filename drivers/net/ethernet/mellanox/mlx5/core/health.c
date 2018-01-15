@@ -78,6 +78,33 @@ enum mlx5_health_err {
 	MLX5_SENSOR_FW_SYND_RFR		= 5,
 };
 
+static void sync_fw_time(struct work_struct *work)
+{
+	u32 in[MLX5_ST_SZ_DW(mrtc_reg)] = {0};
+	u32 out[MLX5_ST_SZ_DW(mrtc_reg)];
+	struct mlx5_core_health *health;
+	struct mlx5_core_dev *dev;
+	struct mlx5_priv *priv;
+	u32 th, tl;
+	struct timeval t;
+	u64 usec;
+
+	health = container_of(work, struct mlx5_core_health, time_sync);
+	priv = container_of(health, struct mlx5_priv, health);
+	dev = container_of(priv, struct mlx5_core_dev, priv);
+
+	do_gettimeofday(&t);
+	usec = t.tv_sec * 1000000ull + t.tv_usec;
+	th = (u32)(usec >> 32);
+	tl = (u32)usec;
+
+	MLX5_SET(mrtc_reg, in, time_h, th);
+	MLX5_SET(mrtc_reg, in, time_l, tl);
+
+	mlx5_core_access_reg(dev, in, sizeof(in), out,
+			     sizeof(out), MLX5_REG_MRTC, 0, 1);
+}
+
 static enum mlx5_nic_mode get_nic_mode(struct mlx5_core_dev *dev)
 {
 	return (ioread32be(&dev->iseg->cmdq_addr_l_sz) >> 8) & 7;
@@ -431,6 +458,10 @@ static void poll_health(unsigned long data)
 		 * restart it.
 		 */
 		return;
+	} else {
+		if (!test_bit(MLX5_DROP_NEW_HEALTH_WORK, &health->flags) &&
+		    MLX5_CAP_MCAM_REG(dev, mrtc))
+			queue_work(health->wq, &health->time_sync);
 	}
 
 out:
@@ -470,6 +501,7 @@ void mlx5_drain_health_wq(struct mlx5_core_dev *dev)
 	spin_unlock_irqrestore(&health->wq_lock, flags);
 	cancel_delayed_work_sync(&health->recover_work);
 	cancel_work_sync(&health->work);
+	cancel_work_sync(&health->time_sync);
 }
 
 void mlx5_health_cleanup(struct mlx5_core_dev *dev)
@@ -499,6 +531,7 @@ int mlx5_health_init(struct mlx5_core_dev *dev)
 	spin_lock_init(&health->wq_lock);
 	INIT_WORK(&health->work, health_care);
 	INIT_DELAYED_WORK(&health->recover_work, health_recover);
+	INIT_WORK(&health->time_sync, sync_fw_time);
 
 	return 0;
 }

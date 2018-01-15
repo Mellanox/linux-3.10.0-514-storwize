@@ -6848,7 +6848,9 @@ struct mlx5_ifc_mcam_access_reg_bits {
 	u8         reserved_at_1f[0x1];
 
 	u8         regs_95_to_64[0x20];
-	u8         regs_63_to_32[0x20];
+	u8         regs_63_to_46[0x12];
+	u8	   mrtc[0x1];
+	u8	   regs_44_to_32[0xd];
 	u8         regs_31_to_0[0x20];
 };
 
@@ -7423,6 +7425,17 @@ struct mlx5_ifc_mcia_reg_bits {
 	u8         dword_9[0x20];
 	u8         dword_10[0x20];
 	u8         dword_11[0x20];
+};
+
+struct mlx5_ifc_mrtc_reg_bits {
+	u8         time_synced[0x1];
+	u8         reserved_at_1[0x1f];
+
+	u8         reserved_at_20[0x20];
+
+	u8         time_h[0x20];
+
+	u8         time_l[0x20];
 };
 
 #endif /* MLX5_IFC_H */
