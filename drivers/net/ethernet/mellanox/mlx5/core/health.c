@@ -62,7 +62,7 @@ enum mlx5_nic_mode {
 	MLX5_NIC_IFC_FULL		= 0,
 	MLX5_NIC_IFC_DISABLED		= 1,
 	MLX5_NIC_IFC_NO_DRAM_NIC	= 2,
-	MLX5_NIC_IFC_INVALID		= 3
+	MLX5_NIC_IFC_SW_RESET		= 7,
 };
 
 enum {
@@ -74,6 +74,7 @@ enum mlx5_health_err {
 	MLX5_SENSOR_PCI_COMM_ERR	= 1,
 	MLX5_SENSOR_PCI_ERR		= 2,
 	MLX5_SENSOR_NIC_DISABLED	= 3,
+	MLX5_SENSOR_NIC_SW_RESET	= 4,
 };
 
 static enum mlx5_nic_mode get_nic_mode(struct mlx5_core_dev *dev)
@@ -116,6 +117,11 @@ static bool sensor_nic_disabled(struct mlx5_core_dev *dev)
 	return get_nic_mode(dev) == MLX5_NIC_IFC_DISABLED;
 }
 
+static bool sensor_nic_sw_reset(struct mlx5_core_dev *dev)
+{
+	return get_nic_mode(dev) == MLX5_NIC_IFC_SW_RESET;
+}
+
 static u32 check_fatal_sensors(struct mlx5_core_dev *dev)
 {
 	if (sensor_pci_not_working(dev))
@@ -124,6 +130,8 @@ static u32 check_fatal_sensors(struct mlx5_core_dev *dev)
 		return MLX5_SENSOR_PCI_ERR;
 	if (sensor_nic_disabled(dev))
 		return MLX5_SENSOR_NIC_DISABLED;
+	if (sensor_nic_sw_reset(dev))
+		return MLX5_SENSOR_NIC_SW_RESET;
 
 	return MLX5_SENSOR_NO_ERR;
 }
@@ -153,9 +161,15 @@ static void mlx5_handle_bad_state(struct mlx5_core_dev *dev)
 	case MLX5_SENSOR_PCI_COMM_ERR:
 		mlx5_core_warn(dev, "Communication with FW over the PCI link is down\n");
 		break;
+
 	case MLX5_SENSOR_NIC_DISABLED:
 		mlx5_core_warn(dev, "NIC mode disabled\n");
 		break;
+
+	case MLX5_SENSOR_NIC_SW_RESET:
+			mlx5_core_warn(dev, "NIC SW reset in progress\n");
+		break;
+
 	default:
 		mlx5_core_warn(dev, "Unknown fatal error: %d\n", dev->priv.health.fatal_error);
 	}
@@ -163,9 +177,13 @@ static void mlx5_handle_bad_state(struct mlx5_core_dev *dev)
 	mlx5_disable_device(dev);
 }
 
+#define MLX5_FW_RESET_WAIT_MS	1000
+#define MLX5_NIC_STATE_POLL_MS	5
 static void health_recover(struct work_struct *work)
 {
+	unsigned long end = jiffies + msecs_to_jiffies(MLX5_FW_RESET_WAIT_MS);
 	struct mlx5_core_health *health;
+	enum mlx5_nic_mode nic_mode;
 	struct delayed_work *dwork;
 	struct mlx5_core_dev *dev;
 	struct mlx5_priv *priv;
@@ -180,16 +198,36 @@ static void health_recover(struct work_struct *work)
 		return;
 	}
 
+	nic_mode = get_nic_mode(dev);
+	while (nic_mode != MLX5_NIC_IFC_DISABLED &&
+	       !time_after(jiffies, end)) {
+		msleep(MLX5_NIC_STATE_POLL_MS);
+		nic_mode = get_nic_mode(dev);
+	}
+
+	if (nic_mode == MLX5_NIC_IFC_SW_RESET) {
+		mlx5_core_err(dev, "health recovery flow aborted, NIC IFC still SW_RESET after 1 second.\n");
+		return;
+	}
+
 	dev_err(&dev->pdev->dev, "starting health recovery flow\n");
 	mlx5_recover_device(dev);
 }
 
 /* How much time to wait until health resetting the driver (in msecs) */
 #define MLX5_RECOVERY_DELAY_MSECS 60000
+#define MLX5_RECOVERY_NO_DELAY 0
+static unsigned long get_recovery_delay(enum mlx5_health_err fatal_error)
+{
+	return fatal_error == MLX5_SENSOR_PCI_COMM_ERR ||
+	       fatal_error == MLX5_SENSOR_PCI_ERR ?
+	       MLX5_RECOVERY_DELAY_MSECS : MLX5_RECOVERY_NO_DELAY;
+}
+
 static void health_care(struct work_struct *work)
 {
-	unsigned long recover_delay = msecs_to_jiffies(MLX5_RECOVERY_DELAY_MSECS);
 	struct mlx5_core_health *health;
+	unsigned long recover_delay;
 	struct mlx5_core_dev *dev;
 	struct mlx5_priv *priv;
 	unsigned long flags;
@@ -198,13 +236,18 @@ static void health_care(struct work_struct *work)
 	priv = container_of(health, struct mlx5_priv, health);
 	dev = container_of(priv, struct mlx5_core_dev, priv);
 	mlx5_handle_bad_state(dev);
+	recover_delay = get_recovery_delay(dev->priv.health.fatal_error);
+	recover_delay = msecs_to_jiffies(recover_delay);
 
 	spin_lock_irqsave(&health->wq_lock, flags);
-	if (!test_bit(MLX5_DROP_NEW_HEALTH_WORK, &health->flags))
+	if (!test_bit(MLX5_DROP_NEW_HEALTH_WORK, &health->flags)) {
+		mlx5_core_warn(dev, "Scheduling recovery work with %lums delay\n",
+			       recover_delay);
 		schedule_delayed_work(&health->recover_work, recover_delay);
-	else
+	} else {
 		dev_err(&dev->pdev->dev,
 			"new health works are not permitted at this stage\n");
+	}
 	spin_unlock_irqrestore(&health->wq_lock, flags);
 }
 
@@ -328,7 +371,7 @@ static void poll_health(unsigned long data)
 
 	fatal_error = check_fatal_sensors(dev);
 
-	if (fatal_error && !health->fatal_error) {
+	if (fatal_error && health->fatal_error == MLX5_SENSOR_NO_ERR) {
 		dev->priv.health.fatal_error = fatal_error;
 		print_health_info(dev);
 		mlx5_trigger_health_work(dev);
